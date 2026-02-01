@@ -1,5 +1,4 @@
 from datetime import date
-
 from fastapi import UploadFile
 from pydantic import BaseModel, field_validator, ConfigDict
 
@@ -14,7 +13,7 @@ class UserProfileCreateSchema(BaseModel):
     last_name: str
     gender: str
     date_of_birth: date
-    info: str | None = None
+    info: str
     avatar: UploadFile | None = None
 
     @field_validator("first_name")
@@ -41,9 +40,16 @@ class UserProfileCreateSchema(BaseModel):
         validate_birth_date(value)
         return value
 
+    @field_validator("info")
+    @classmethod
+    def check_info(cls, value: str) -> str:
+        if not value or value.strip() == "":
+            raise ValueError("Info cannot be empty or just whitespace")
+        return value
+
     @field_validator("avatar")
     @classmethod
-    def check_avatar(cls, value: UploadFile | None) -> UploadFile:
+    def check_avatar(cls, value: UploadFile | None) -> UploadFile | None:
         if value:
             validate_image(value)
         return value
@@ -58,4 +64,4 @@ class UserProfileResponseSchema(BaseModel):
     gender: GenderEnum | None = None
     date_of_birth: date | None = None
     info: str | None = None
-    avatar_url: str | None = None
+    avatar: str | None = None
