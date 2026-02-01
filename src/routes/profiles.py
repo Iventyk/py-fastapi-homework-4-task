@@ -1,9 +1,8 @@
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, Form, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
+from datetime import date
 
 from database import get_db, UserModel, UserProfileModel
 from database.models.accounts import GenderEnum
@@ -12,7 +11,8 @@ from storages.s3 import S3StorageClient
 from config import get_s3_storage_client, get_jwt_auth_manager
 from fastapi.security import OAuth2PasswordBearer
 from security.interfaces import JWTAuthManagerInterface
-
+from exceptions.security import TokenExpiredError, InvalidTokenError
+from exceptions.storage import S3FileUploadError
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/accounts/login/")
@@ -26,8 +26,10 @@ async def get_current_user(
     try:
         payload = jwt_manager.decode_access_token(token)
         user_id = payload.get("user_id")
-    except Exception:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+    except TokenExpiredError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has expired.")
+    except InvalidTokenError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token.")
 
     stmt = select(UserModel).where(UserModel.id == user_id)
     result = await db.execute(stmt)
@@ -48,25 +50,32 @@ async def create_profile(
         first_name: str = Form(),
         last_name: str = Form(),
         gender: str = Form(),
-        date_of_birth: str = Form(),
+        date_of_birth: date = Form(),
         info: str = Form(),
         avatar: UploadFile | None = None,
         db: AsyncSession = Depends(get_db),
         current_user: UserModel = Depends(get_current_user),
         s3_client: S3StorageClient = Depends(get_s3_storage_client)
 ) -> UserProfileResponseSchema:
+
+    stmt = select(UserModel).where(UserModel.id == user_id)
+    result = await db.execute(stmt)
+    user_from_path = result.scalars().first()
+    if not user_from_path or not user_from_path.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or not active")
+
     if user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail="You don't have permission to edit this profile.")
 
-    if current_user.profile:
+    if user_from_path.profile:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User already has a profile.")
 
     profile_data = UserProfileCreateSchema(
         first_name=first_name,
         last_name=last_name,
         gender=gender,
-        date_of_birth=datetime.strptime(date_of_birth, "%Y-%m-%d").date(),
+        date_of_birth=date_of_birth,
         info=info,
         avatar=avatar
     )
@@ -85,7 +94,7 @@ async def create_profile(
             file_bytes = await avatar_file.read()
             await s3_client.upload_file(file_name, file_bytes)
             profile.avatar = await s3_client.get_file_url(file_name)
-        except Exception:
+        except S3FileUploadError:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                                 detail="Failed to upload avatar. Please try again later.")
 
