@@ -56,7 +56,8 @@ async def create_profile(
         s3_client: S3StorageClient = Depends(get_s3_storage_client)
 ) -> UserProfileResponseSchema:
     if user_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You don't have permission to edit this profile.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="You don't have permission to edit this profile.")
 
     if current_user.profile:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User already has a profile.")
@@ -85,7 +86,8 @@ async def create_profile(
             await s3_client.upload_file(file_name, file_bytes)
             profile.avatar = await s3_client.get_file_url(file_name)
         except Exception:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to upload avatar. Please try again later.")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                detail="Failed to upload avatar. Please try again later.")
 
     try:
         db.add(profile)
